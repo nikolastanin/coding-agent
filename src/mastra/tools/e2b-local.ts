@@ -5,6 +5,36 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 
+// Global state manager for project ID
+class ProjectStateManager {
+    private static instance: ProjectStateManager;
+    private currentProjectId: string | null = null;
+
+    private constructor() {}
+
+    public static getInstance(): ProjectStateManager {
+        if (!ProjectStateManager.instance) {
+            ProjectStateManager.instance = new ProjectStateManager();
+        }
+        return ProjectStateManager.instance;
+    }
+
+    public setProjectId(projectId: string): void {
+        this.currentProjectId = projectId;
+    }
+
+    public getProjectId(): string | null {
+        return this.currentProjectId;
+    }
+
+    public hasProjectId(): boolean {
+        return this.currentProjectId !== null;
+    }
+}
+
+// Get the singleton instance
+const projectState = ProjectStateManager.getInstance();
+
 // Rate limiting delay to prevent OpenAI API rate limits
 const RATE_LIMIT_DELAY = 1500; // 1.5 seconds between tool executions
 
@@ -46,6 +76,15 @@ function resolveProjectFilePath(projectId: string, filePath: string): string {
     // Remove leading slash if present and join with project path
     const cleanPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
     return path.join(projectPath, cleanPath);
+}
+
+// Helper function to get current projectId or throw error if none exists
+function getCurrentProjectId(): string {
+    const projectId = projectState.getProjectId();
+    if (!projectId) {
+        throw new Error('No project ID available. Please create a project first using createProject tool.');
+    }
+    return projectId;
 }
 
 export const createProject = createTool({
@@ -138,6 +177,9 @@ export const createProject = createTool({
                     );
                 }
 
+                        // Store the projectId in global state for other tools to use
+                        projectState.setProjectId(projectId);
+                        
                         return {
                             projectId: projectId,
                         };
@@ -155,7 +197,7 @@ export const runCode = createTool({
     id: 'runCode',
     description: 'Run code in a local project directory',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to run the code'),
+        projectId: z.string().optional().describe('The projectId for the project to run the code (optional, will use current project if not provided)'),
         code: z.string().describe('The code to run in the project'),
         runCodeOpts: z
             .object({
@@ -189,8 +231,13 @@ export const runCode = createTool({
         return withRateLimit(async () => {
                 return withRateLimit(async () => {
                     try {
-                        const projectPath = getProjectPath(context.projectId);
+                        // Use provided projectId or get from global state
+                        const projectId = context.projectId || getCurrentProjectId();
+                        const projectPath = getProjectPath(projectId);
                         const options = context.runCodeOpts || {};
+                        const language = (options as any).language || 'python';
+                        const envs = (options as any).envs || {};
+                        const timeoutMS = (options as any).timeoutMS || 60000;
 
                 // Create temporary file for code execution
                 const tempFileName = `temp_${Date.now()}`;
@@ -198,7 +245,7 @@ export const runCode = createTool({
                 let command: string;
                 let args: string[] = [];
 
-                switch (options.language) {
+                switch (language) {
                     case 'python':
                         tempFilePath = path.join(projectPath, `${tempFileName}.py`);
                         command = 'python';
@@ -227,8 +274,8 @@ export const runCode = createTool({
                 const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
                     const child = spawn(command, args, {
                         cwd: projectPath,
-                        env: { ...process.env, ...options.envs },
-                        timeout: options.timeoutMS || 60000,
+                        env: { ...process.env, ...envs },
+                        timeout: timeoutMS,
                     });
 
                     let stdout = '';
@@ -290,7 +337,7 @@ export const readFile = createTool({
     id: 'readFile',
     description: 'Read a file from the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to read the file from'),
+        projectId: z.string().optional().describe('The projectId for the project to read the file from (optional, will use current project if not provided)'),
         path: z.string().describe('The path to the file to read'),
     }),
     outputSchema: z
@@ -307,7 +354,9 @@ export const readFile = createTool({
         return withRateLimit(async () => {
                 return withRateLimit(async () => {
                     try {
-                        const filePath = resolveProjectFilePath(context.projectId, context.path);
+                        // Use provided projectId or get from global state
+                        const projectId = context.projectId || getCurrentProjectId();
+                        const filePath = resolveProjectFilePath(projectId, context.path);
                         const fileContent = await fs.readFile(filePath, 'utf-8');
 
                         return {
@@ -328,7 +377,7 @@ export const writeFile = createTool({
     id: 'writeFile',
     description: 'Write a single file to the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to write the file to'),
+        projectId: z.string().optional().describe('The projectId for the project to write the file to (optional, will use current project if not provided)'),
         path: z.string().describe('The path where the file should be written'),
         content: z.string().describe('The content to write to the file'),
     }),
@@ -346,7 +395,9 @@ export const writeFile = createTool({
         return withRateLimit(async () => {
                 return withRateLimit(async () => {
                     try {
-                        const filePath = resolveProjectFilePath(context.projectId, context.path);
+                        // Use provided projectId or get from global state
+                        const projectId = context.projectId || getCurrentProjectId();
+                        const filePath = resolveProjectFilePath(projectId, context.path);
 
                         // Ensure directory exists
                         const dir = path.dirname(filePath);
@@ -372,7 +423,7 @@ export const writeFiles = createTool({
     id: 'writeFiles',
     description: 'Write multiple files to the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to write the files to'),
+        projectId: z.string().optional().describe('The projectId for the project to write the files to (optional, will use current project if not provided)'),
         files: z
             .array(
                 z.object({
@@ -396,10 +447,12 @@ export const writeFiles = createTool({
         return withRateLimit(async () => {
                 return withRateLimit(async () => {
                     try {
+                        // Use provided projectId or get from global state
+                        const projectId = context.projectId || getCurrentProjectId();
                         const filesWritten: string[] = [];
 
                         for (const file of context.files) {
-                            const filePath = resolveProjectFilePath(context.projectId, file.path);
+                            const filePath = resolveProjectFilePath(projectId, file.path);
 
                             // Ensure directory exists
                             const dir = path.dirname(filePath);
@@ -423,11 +476,93 @@ export const writeFiles = createTool({
     },
 });
 
+export const setProjectId = createTool({
+    id: 'setProjectId',
+    description: 'Set the current project ID manually (useful when you know the projectId from a previous session)',
+    inputSchema: z.object({
+        projectId: z.string().describe('The project ID to set as current'),
+    }),
+    outputSchema: z
+        .object({
+            success: z.boolean().describe('Whether the project ID was set successfully'),
+            projectId: z.string().describe('The project ID that was set'),
+            projectPath: z.string().describe('The full path to the project'),
+        })
+        .or(
+            z.object({
+                error: z.string().describe('The error if setting the project ID failed'),
+            }),
+        ),
+    execute: async ({ context }) => {
+        return withRateLimit(async () => {
+            try {
+                const projectId = context.projectId;
+                const projectPath = getProjectPath(projectId);
+                
+                // Verify the project directory exists
+                try {
+                    await fs.access(projectPath);
+                } catch {
+                    return {
+                        error: `Project directory does not exist: ${projectPath}`,
+                    };
+                }
+                
+                // Set the project ID in global state
+                projectState.setProjectId(projectId);
+                
+                return {
+                    success: true,
+                    projectId,
+                    projectPath,
+                };
+            } catch (e) {
+                return {
+                    error: JSON.stringify(e),
+                };
+            }
+        });
+    },
+});
+
+export const getCurrentProject = createTool({
+    id: 'getCurrentProject',
+    description: 'Get information about the current project',
+    inputSchema: z.object({}),
+    outputSchema: z
+        .object({
+            projectId: z.string().describe('The current project ID'),
+            projectPath: z.string().describe('The full path to the current project'),
+        })
+        .or(
+            z.object({
+                error: z.string().describe('The error if no project is currently active'),
+            }),
+        ),
+    execute: async () => {
+        return withRateLimit(async () => {
+            try {
+                const projectId = getCurrentProjectId();
+                const projectPath = getProjectPath(projectId);
+                
+                return {
+                    projectId,
+                    projectPath,
+                };
+            } catch (e) {
+                return {
+                    error: JSON.stringify(e),
+                };
+            }
+        });
+    },
+});
+
 export const listFiles = createTool({
     id: 'listFiles',
     description: 'List files and directories in a path within the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to list files from'),
+        projectId: z.string().optional().describe('The projectId for the project to list files from (optional, will use current project if not provided)'),
         path: z.string().default('./').describe('The directory path to list files from'),
     }),
     outputSchema: z
@@ -450,7 +585,9 @@ export const listFiles = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const dirPath = resolveProjectFilePath(context.projectId, context.path);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            const dirPath = resolveProjectFilePath(projectId, context.path);
             const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
             const files = entries.map(entry => ({
@@ -475,7 +612,7 @@ export const deleteFile = createTool({
     id: 'deleteFile',
     description: 'Delete a file or directory from the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to delete the file from'),
+        projectId: z.string().optional().describe('The projectId for the project to delete the file from (optional, will use current project if not provided)'),
         path: z.string().describe('The path to the file or directory to delete'),
     }),
     outputSchema: z
@@ -490,7 +627,9 @@ export const deleteFile = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const filePath = resolveProjectFilePath(context.projectId, context.path);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            const filePath = resolveProjectFilePath(projectId, context.path);
             const stat = await fs.stat(filePath);
 
             if (stat.isDirectory()) {
@@ -515,7 +654,7 @@ export const createDirectory = createTool({
     id: 'createDirectory',
     description: 'Create a directory in the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to create the directory in'),
+        projectId: z.string().optional().describe('The projectId for the project to create the directory in (optional, will use current project if not provided)'),
         path: z.string().describe('The path where the directory should be created'),
     }),
     outputSchema: z
@@ -530,7 +669,23 @@ export const createDirectory = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const dirPath = resolveProjectFilePath(context.projectId, context.path);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            
+            // First validate that the projectId exists and is correct
+            const projectPath = getProjectPath(projectId);
+            
+            try {
+                // Check if the project directory exists
+                await fs.access(projectPath);
+            } catch {
+                return {
+                    error: `Project ID "${projectId}" is not correct or project does not exist. Please use a valid projectId.`,
+                };
+            }
+            
+            // If projectId is valid, proceed with directory creation
+            const dirPath = resolveProjectFilePath(projectId, context.path);
             await fs.mkdir(dirPath, { recursive: true });
 
             return {
@@ -549,7 +704,7 @@ export const getFileInfo = createTool({
     id: 'getFileInfo',
     description: 'Get detailed information about a file or directory in the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to get file information from'),
+        projectId: z.string().optional().describe('The projectId for the project to get file information from (optional, will use current project if not provided)'),
         path: z.string().describe('The path to the file or directory to get information about'),
     }),
     outputSchema: z
@@ -572,7 +727,9 @@ export const getFileInfo = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const filePath = resolveProjectFilePath(context.projectId, context.path);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            const filePath = resolveProjectFilePath(projectId, context.path);
             const stat = await fs.stat(filePath);
             const fileName = path.basename(filePath);
 
@@ -623,7 +780,7 @@ export const checkFileExists = createTool({
     id: 'checkFileExists',
     description: 'Check if a file or directory exists in the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to check file existence in'),
+        projectId: z.string().optional().describe('The projectId for the project to check file existence in (optional, will use current project if not provided)'),
         path: z.string().describe('The path to check for existence'),
     }),
     outputSchema: z
@@ -639,7 +796,9 @@ export const checkFileExists = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const filePath = resolveProjectFilePath(context.projectId, context.path);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            const filePath = resolveProjectFilePath(projectId, context.path);
 
             try {
                 const stat = await fs.stat(filePath);
@@ -667,7 +826,7 @@ export const getFileSize = createTool({
     id: 'getFileSize',
     description: 'Get the size of a file or directory in the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to get file size from'),
+        projectId: z.string().optional().describe('The projectId for the project to get file size from (optional, will use current project if not provided)'),
         path: z.string().describe('The path to the file or directory'),
         humanReadable: z
             .boolean()
@@ -688,7 +847,9 @@ export const getFileSize = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const filePath = resolveProjectFilePath(context.projectId, context.path);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            const filePath = resolveProjectFilePath(projectId, context.path);
             const stat = await fs.stat(filePath);
 
             let humanReadableSize: string | undefined;
@@ -723,7 +884,7 @@ export const watchDirectory = createTool({
     id: 'watchDirectory',
     description: 'Start watching a directory for file system changes in the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to watch directory in'),
+        projectId: z.string().optional().describe('The projectId for the project to watch directory in (optional, will use current project if not provided)'),
         path: z.string().describe('The directory path to watch for changes'),
         recursive: z.boolean().default(false).describe('Whether to watch subdirectories recursively'),
         watchDuration: z
@@ -754,7 +915,9 @@ export const watchDirectory = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const dirPath = resolveProjectFilePath(context.projectId, context.path);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            const dirPath = resolveProjectFilePath(projectId, context.path);
             const events: Array<{ type: LocalFilesystemEventType; name: string; timestamp: string }> = [];
 
             // Start watching the directory
@@ -791,7 +954,7 @@ export const runCommand = createTool({
     id: 'runCommand',
     description: 'Run a shell command in the local project',
     inputSchema: z.object({
-        projectId: z.string().describe('The projectId for the project to run the command in'),
+        projectId: z.string().optional().describe('The projectId for the project to run the command in (optional, will use current project if not provided)'),
         command: z.string().describe('The shell command to execute'),
         workingDirectory: z.string().optional().describe('The working directory to run the command in (relative to project root)'),
         timeoutMs: z.number().default(30000).describe('Timeout for the command execution in milliseconds'),
@@ -813,9 +976,11 @@ export const runCommand = createTool({
         ),
     execute: async ({ context }) => {
         try {
-            const projectPath = getProjectPath(context.projectId);
+            // Use provided projectId or get from global state
+            const projectId = context.projectId || getCurrentProjectId();
+            const projectPath = getProjectPath(projectId);
             const workingDir = context.workingDirectory 
-                ? resolveProjectFilePath(context.projectId, context.workingDirectory)
+                ? resolveProjectFilePath(projectId, context.workingDirectory)
                 : projectPath;
 
             const startTime = Date.now();

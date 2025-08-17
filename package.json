@@ -1,37 +1,40 @@
 {
-  "name": "coding-agent",
-  "version": "0.2.0",
-  "description": "Advanced Mastra AI coding agent with secure E2B sandbox execution, comprehensive file management, and multi-language support for Python, JavaScript, and TypeScript development workflows",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "mastra dev",
-    "build": "mastra build",
-    "start": "mastra start"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
-  "engines": {
-    "node": ">=20.9.0"
-  },
-  "dependencies": {
-    "@ai-sdk/openai": "^1.3.23",
-    "@dqbd/tiktoken": "^1.0.22",
-    "@e2b/code-interpreter": "^1.5.1",
-    "@mastra/core": "latest",
-    "@mastra/fastembed": "latest",
-    "@mastra/libsql": "latest",
-    "@mastra/loggers": "latest",
-    "@mastra/mcp": "latest",
-    "@mastra/memory": "latest",
-    "bottleneck": "^2.19.5",
-    "zod": "^3.25.76"
-  },
-  "devDependencies": {
-    "@types/node": "^24.1.0",
-    "mastra": "latest",
-    "typescript": "^5.8.3"
-  }
+    "name": "coding-agent",
+    "version": "0.2.0",
+    "description": "Advanced Mastra AI coding agent with secure E2B sandbox execution, comprehensive file management, and multi-language support for Python, JavaScript, and TypeScript development workflows",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "dev": "mastra dev",
+        "build": "mastra build",
+        "start": "mastra start"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "module",
+    "engines": {
+        "node": ">=20.9.0"
+    },
+    "dependencies": {
+        "@ai-sdk/google": "^1.0",
+        "@ai-sdk/replicate": "^1.0",
+        "@ai-sdk/togetherai": "0.2.14",
+        "@ai-sdk/openai": "^1.3.23",
+        "@dqbd/tiktoken": "^1.0.22",
+        "@e2b/code-interpreter": "^1.5.1",
+        "@mastra/core": "latest",
+        "@mastra/fastembed": "latest",
+        "@mastra/libsql": "latest",
+        "@mastra/loggers": "latest",
+        "@mastra/mcp": "latest",
+        "@mastra/memory": "latest",
+        "bottleneck": "^2.19.5",
+        "zod": "^3.25.76"
+    },
+    "devDependencies": {
+        "@types/node": "^24.1.0",
+        "mastra": "latest",
+        "typescript": "^5.8.3"
+    }
 }
