@@ -19,3 +19,4 @@ to add :
 context: you are using this boilerplate or theme
 when reusing forms, paste tailwind.css so we can be consistent across projects
 searchTool !!!!!
+ finishReason: "error" - add error handling and retry 

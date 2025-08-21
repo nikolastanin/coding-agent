@@ -950,6 +950,8 @@ export const watchDirectory = createTool({
     },
 });
 
+
+
 export const runCommand = createTool({
     id: 'runCommand',
     description: 'Run a shell command in the local project',
@@ -960,7 +962,7 @@ export const runCommand = createTool({
         timeoutMs: z.number().default(30000).describe('Timeout for the command execution in milliseconds'),
         captureOutput: z.boolean().default(true).describe('Whether to capture stdout and stderr output'),
     }),
-    outputSchema: z
+                outputSchema: z
         .object({
             success: z.boolean().describe('Whether the command executed successfully'),
             exitCode: z.number().describe('The exit code of the command'),
@@ -968,6 +970,7 @@ export const runCommand = createTool({
             stderr: z.string().describe('The standard error from the command'),
             command: z.string().describe('The command that was executed'),
             executionTime: z.number().describe('How long the command took to execute in milliseconds'),
+            workingDir: z.string().describe('The working directory where the command was executed'),
         })
         .or(
             z.object({
@@ -979,18 +982,63 @@ export const runCommand = createTool({
             // Use provided projectId or get from global state
             const projectId = context.projectId || getCurrentProjectId();
             const projectPath = getProjectPath(projectId);
-            const workingDir = context.workingDirectory 
+            let workingDir = context.workingDirectory 
                 ? resolveProjectFilePath(projectId, context.workingDirectory)
                 : projectPath;
 
             const startTime = Date.now();
 
+            // For npm commands, automatically find the correct working directory if package.json is not in current workingDir
+            if (context.command.startsWith('npm ') && !context.workingDirectory) {
+                const packageJsonPath = path.join(workingDir, 'package.json');
+                try {
+                    await fs.access(packageJsonPath);
+                } catch {
+                    // package.json not found in current workingDir, search for it
+                    const searchForPackageJson = async (dir: string): Promise<string | null> => {
+                        try {
+                            const entries = await fs.readdir(dir, { withFileTypes: true });
+                            
+                            for (const entry of entries) {
+                                if (entry.name === 'package.json') {
+                                    return dir;
+                                }
+                            }
+                            
+                            // Search subdirectories
+                            for (const entry of entries) {
+                                if (entry.isDirectory()) {
+                                    const subDir = path.join(dir, entry.name);
+                                    const result = await searchForPackageJson(subDir);
+                                    if (result) return result;
+                                }
+                            }
+                        } catch (e) {
+                            // Directory not accessible, skip
+                        }
+                        
+                        return null;
+                    };
+
+                    const foundDir = await searchForPackageJson(workingDir);
+                    if (foundDir) {
+                        // Update workingDir to where package.json was found
+                        workingDir = foundDir;
+                    } else {
+                        return {
+                            error: `package.json not found in project. Please ensure you're running npm commands from the correct directory.`,
+                        };
+                    }
+                }
+            }
+
             const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
-                const [cmd, ...args] = context.command.split(' ');
-                const child = spawn(cmd, args, {
+                // For npm commands, use shell execution to handle them properly
+                const child = spawn(context.command, [], {
                     cwd: workingDir,
                     timeout: context.timeoutMs,
                     shell: true,
+                    stdio: context.captureOutput ? 'pipe' : 'inherit',
                 });
 
                 let stdout = '';
@@ -1032,6 +1080,7 @@ export const runCommand = createTool({
                 stderr: result.stderr,
                 command: context.command,
                 executionTime,
+                workingDir,
             };
         } catch (e) {
             return {
