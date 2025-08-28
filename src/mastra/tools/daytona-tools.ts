@@ -113,7 +113,7 @@ export const createProject = createTool({
                 const daytona = getDaytonaClient();
                 // Create Daytona sandbox with 30-minute auto-stop
                 // Use Python so process.codeRun snippets (subprocess) work reliably
-                const sandbox = await daytona.create({ language: 'python', autoStopInterval: 30 }); // docs: https://www.daytona.io/docs/sandbox-management/
+                const sandbox = await daytona.create({ language: 'python', autoStopInterval: 30, public: false, }); // docs: https://www.daytona.io/docs/sandbox-management/
 
                 // Clone boilerplate directly into workspace to avoid subsequent moves
                 // Prefer Daytona Git API for cloning per docs: https://www.daytona.io/docs/git-operations/
