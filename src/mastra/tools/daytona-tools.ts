@@ -100,7 +100,7 @@ export const createProject = createTool({
     }),
     outputSchema: z
         .object({
-            projectId: z.string(),
+            projectId: z.string().optional(),
         })
         .or(
             z.object({
@@ -151,7 +151,7 @@ export const runCode = createTool({
     description: 'Run code in the Daytona project sandbox',
     inputSchema: z.object({
         projectId: z.string().optional().describe('The projectId (Daytona sandbox id). If omitted, uses current project.'),
-        code: z.string().describe('The code to run in the sandbox'),
+        code: z.string().optional().describe('The code to run in the sandbox'),
         runCodeOpts: z
             .object({
                 language: z.enum(['ts', 'js', 'python']).default('python').describe('Preferred language context'),
@@ -169,6 +169,12 @@ export const runCode = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.code) {
+                    return {
+                        error:
+                            'Missing required argument: "code". Provide valid code to execute (e.g. "console.log(\'Hello World\')"), then call runCode again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -187,7 +193,7 @@ export const readFile = createTool({
     description: 'Read a file from the Daytona project sandbox',
     inputSchema: z.object({
         projectId: z.string().optional(),
-        path: z.string().describe('Path to file to read (relative to /workspace or absolute)'),
+        path: z.string().optional().describe('Path to file to read (relative to /workspace or absolute)'),
     }),
     outputSchema: z
         .object({ content: z.string(), path: z.string(), executionPath: z.string().optional() })
@@ -195,6 +201,12 @@ export const readFile = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.path) {
+                    return {
+                        error:
+                            'Missing required argument: "path". Provide a valid file path (e.g. "/workspace/src/App.tsx" or "src/App.tsx"), then call readFile again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -216,8 +228,8 @@ export const writeFile = createTool({
     description: 'Write a single file to the Daytona project sandbox',
     inputSchema: z.object({
         projectId: z.string().optional(),
-        path: z.string(),
-        content: z.string(),
+        path: z.string().optional(),
+        content: z.string().optional(),
     }),
     outputSchema: z
         .object({ success: z.boolean(), path: z.string(), executionPath: z.string().optional() })
@@ -225,6 +237,16 @@ export const writeFile = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                const missing: string[] = [];
+                if (!context?.path) missing.push('path');
+                if (!context?.content && context?.content !== '') missing.push('content');
+                if (missing.length) {
+                    return {
+                        error:
+                            `Missing required argument(s): ${missing.join(', ')}. Provide both "path" (e.g. "/workspace/src/App.tsx") and "content" (string), then call writeFile again.`,
+                    };
+                }
+
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -233,8 +255,8 @@ export const writeFile = createTool({
                 const target = relativePath === '.' ? workingDir : `${workingDir}/${relativePath}`;
                 const parent = target.split('/').slice(0, -1).join('/') || workingDir;
                 await sandbox.fs.createFolder(parent, '755');
-                await sandbox.fs.uploadFile(Buffer.from(context.content, 'utf-8'), target);
-                return { success: true, path: context.path, executionPath: filePath };
+                await sandbox.fs.uploadFile(Buffer.from(context.content!, 'utf-8'), target);
+                return { success: true, path: context.path!, executionPath: filePath };
             } catch (e) {
                 return { error: getErrorMessage(e) };
             }
@@ -247,7 +269,7 @@ export const writeFiles = createTool({
     description: 'Write multiple files to the Daytona project sandbox',
     inputSchema: z.object({
         projectId: z.string().optional(),
-        files: z.array(z.object({ path: z.string(), data: z.string() })),
+        files: z.array(z.object({ path: z.string(), data: z.string() })).optional(),
     }),
     outputSchema: z
         .object({ success: z.boolean(), filesWritten: z.array(z.string()), executionPath: z.string().optional() })
@@ -255,6 +277,12 @@ export const writeFiles = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.files || !Array.isArray(context.files) || context.files.length === 0) {
+                    return {
+                        error:
+                            'Missing required argument: "files". Provide an array of file objects with "path" and "data" properties, then call writeFiles again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -297,6 +325,12 @@ export const setProjectId = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.projectId) {
+                    return {
+                        error:
+                            'Missing required argument: "projectId". Provide a valid project ID (Daytona sandbox id), then call setProjectId again.',
+                    };
+                }
                 const daytona = getDaytonaClient();
                 await daytona.get(context.projectId); // validate exists
                 projectState.setProjectId(context.projectId);
@@ -363,13 +397,19 @@ export const listFiles = createTool({
 export const deleteFile = createTool({
     id: 'deleteFile',
     description: 'Delete a file or directory in the Daytona project sandbox',
-    inputSchema: z.object({ projectId: z.string().optional(), path: z.string() }),
+    inputSchema: z.object({ projectId: z.string().optional(), path: z.string().optional() }),
     outputSchema: z
         .object({ success: z.boolean(), path: z.string(), executionPath: z.string().optional() })
         .or(z.object({ error: z.string() })),
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.path) {
+                    return {
+                        error:
+                            'Missing required argument: "path". Provide a valid file/directory path (e.g. "/workspace/src/App.tsx" or "src/App.tsx"), then call deleteFile again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -403,13 +443,19 @@ export const deleteFile = createTool({
 export const createDirectory = createTool({
     id: 'createDirectory',
     description: 'Create a directory in the Daytona project sandbox',
-    inputSchema: z.object({ projectId: z.string().optional(), path: z.string() }),
+    inputSchema: z.object({ projectId: z.string().optional(), path: z.string().optional() }),
     outputSchema: z
         .object({ success: z.boolean(), path: z.string(), executionPath: z.string().optional() })
         .or(z.object({ error: z.string() })),
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.path) {
+                    return {
+                        error:
+                            'Missing required argument: "path". Provide a valid directory path (e.g. "/workspace/src/components" or "src/components"), then call createDirectory again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -428,7 +474,7 @@ export const createDirectory = createTool({
 export const getFileInfo = createTool({
     id: 'getFileInfo',
     description: 'Get metadata for a file or directory in the Daytona project sandbox',
-    inputSchema: z.object({ projectId: z.string().optional(), path: z.string() }),
+    inputSchema: z.object({ projectId: z.string().optional(), path: z.string().optional() }),
     outputSchema: z
         .object({
             name: z.string(),
@@ -447,6 +493,12 @@ export const getFileInfo = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.path) {
+                    return {
+                        error:
+                            'Missing required argument: "path". Provide a valid file/directory path (e.g. "/workspace/src/App.tsx" or "src/App.tsx"), then call getFileInfo again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -478,13 +530,19 @@ export const getFileInfo = createTool({
 export const checkFileExists = createTool({
     id: 'checkFileExists',
     description: 'Check if a path exists in the Daytona project sandbox',
-    inputSchema: z.object({ projectId: z.string().optional(), path: z.string() }),
+    inputSchema: z.object({ projectId: z.string().optional(), path: z.string().optional() }),
     outputSchema: z
         .object({ exists: z.boolean(), path: z.string(), type: z.enum(['file','directory']).optional(), executionPath: z.string().optional() })
         .or(z.object({ error: z.string() })),
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.path) {
+                    return {
+                        error:
+                            'Missing required argument: "path". Provide a valid file/directory path (e.g. "/workspace/src/App.tsx" or "src/App.tsx"), then call checkFileExists again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -509,7 +567,7 @@ export const getFileSize = createTool({
     description: 'Get the size of a file or directory in the Daytona project sandbox',
     inputSchema: z.object({
         projectId: z.string().optional(),
-        path: z.string(),
+        path: z.string().optional(),
         humanReadable: z.boolean().default(false),
     }),
     outputSchema: z
@@ -518,6 +576,12 @@ export const getFileSize = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.path) {
+                    return {
+                        error:
+                            'Missing required argument: "path". Provide a valid file/directory path (e.g. "/workspace/src/App.tsx" or "src/App.tsx"), then call getFileSize again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -548,7 +612,7 @@ export const watchDirectory = createTool({
     description: 'Watch a directory for changes in the Daytona project sandbox (polled)',
     inputSchema: z.object({
         projectId: z.string().optional(),
-        path: z.string(),
+        path: z.string().optional(),
         recursive: z.boolean().default(false),
         watchDuration: z.number().default(30000),
     }),
@@ -563,6 +627,12 @@ export const watchDirectory = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.path) {
+                    return {
+                        error:
+                            'Missing required argument: "path". Provide a valid directory path (e.g. "/workspace/src" or "src"), then call watchDirectory again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
@@ -606,7 +676,7 @@ export const runCommand = createTool({
     description: 'Run a shell command in the Daytona project sandbox',
     inputSchema: z.object({
         projectId: z.string().optional(),
-        command: z.string(),
+        command: z.string().optional(),
         workingDirectory: z.string().optional().describe('Relative to /workspace'),
         timeoutMs: z.number().default(30000),
         captureOutput: z.boolean().default(true),
@@ -627,6 +697,12 @@ export const runCommand = createTool({
     execute: async ({ context }) => {
         return withRateLimit(async () => {
             try {
+                if (!context.command) {
+                    return {
+                        error:
+                            'Missing required argument: "command". Provide a valid shell command (e.g. "npm install" or "ls -la"), then call runCommand again.',
+                    };
+                }
                 const projectId = requireCurrentProjectId(context.projectId);
                 const daytona = getDaytonaClient();
                 const sandbox = await daytona.get(projectId);
